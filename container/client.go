@@ -185,16 +185,12 @@ func (client dockerClient) IsContainerStale(c Container) (bool, error) {
 	oldImageInfo := c.imageInfo
 	imageName := c.ImageName()
 
-	println("TEST")
-	println(imageName);
-	separatorIndex := strings.Index(imageName, ":")
+	separatorIndex := strings.Index(imageName, "@")
 	if (separatorIndex > -1) {
-		// there's a colon in image name, this is probably a stack deployed container where image includes full tag and hash.
+		// there's an @ in image name, this is probably a stack deployed container where image includes full tag and sha256 hash.
 		// let's strip it!
 		imageName = imageName[:separatorIndex]
 	}
-	println(imageName)
-
 
 	if client.pullImages {
 		log.Debugf("Pulling %s for %s", imageName, c.Name())
