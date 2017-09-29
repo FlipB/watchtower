@@ -1,4 +1,4 @@
-package main // import "github.com/v2tec/watchtower"
+package main // import "github.com/flipb/watchtower"
 
 import (
 	"fmt"
@@ -12,8 +12,8 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/robfig/cron"
 	"github.com/urfave/cli"
-	"github.com/v2tec/watchtower/actions"
-	"github.com/v2tec/watchtower/container"
+	"github.com/flipb/watchtower/actions"
+	"github.com/flipb/watchtower/container"
 )
 
 // DockerAPIMinVersion is the version of the docker API, which is minimally required by

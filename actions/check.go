@@ -3,7 +3,7 @@ package actions
 import (
 	"sort"
 
-	"github.com/v2tec/watchtower/container"
+	"github.com/flipb/watchtower/container"
 )
 
 func watchtowerContainersFilter(c container.Container) bool { return c.IsWatchtower() }

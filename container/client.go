@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"time"
+	"strings"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/docker/docker/api/types"
@@ -183,6 +184,17 @@ func (client dockerClient) IsContainerStale(c Container) (bool, error) {
 	bg := context.Background()
 	oldImageInfo := c.imageInfo
 	imageName := c.ImageName()
+
+	println("TEST")
+	println(imageName);
+	separatorIndex := strings.Index(imageName, ":")
+	if (separatorIndex > -1) {
+		// there's a colon in image name, this is probably a stack deployed container where image includes full tag and hash.
+		// let's strip it!
+		imageName = imageName[:separatorIndex]
+	}
+	println(imageName)
+
 
 	if client.pullImages {
 		log.Debugf("Pulling %s for %s", imageName, c.Name())
