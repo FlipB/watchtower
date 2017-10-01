@@ -102,13 +102,14 @@ func (client dockerClient) ListContainers(fn Filter) ([]Container, Services, err
 		if err != nil {
 			return nil, nil, err
 		}
-		
-		log.Infof("ContainerInspect Image: %s", runningContainer.)
 
 		imageInfo, _, err := client.api.ImageInspectWithRaw(bg, containerInfo.Image)
 		if err != nil {
 			return nil, nil, err
 		}
+
+
+		log.Infof("Container running Image: %s, running ImageID: %s, ContainerInspect Image: %s, ImageInspect ImageID: %s", runningContainer.Image, runningContainer.ImageID, containerInfo.Image, imageInfo.ID)
 
 		c := Container{containerInfo: &containerInfo, imageInfo: &imageInfo}
 		if !fn(c) {
