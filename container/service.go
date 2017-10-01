@@ -57,3 +57,7 @@ func (s *Service) AddContainer(c Container) {
 func (s Service) Name() string {
 	return s.name
 }
+
+func (s Service) Containers() []Container {
+	return s.containers
+}

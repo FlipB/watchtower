@@ -72,10 +72,14 @@ func (client dockerClient) ListContainers(fn Filter) ([]Container, Services, err
 		id := service.ID
 		image := service.Spec.TaskTemplate.ContainerSpec.Image
 
+		log.Infof("Service spec Image: %s", image)
+
 		imageInfo, _, err := client.api.ImageInspectWithRaw(bg, image)
 		if err != nil {
 			return nil, nil, err
 		}
+
+		log.Infof("Service spec ImageInfoContainerConfigImage: %s", imageInfo.ContainerConfig.Image)
 
 		s := Service{ name: name, id: id, imageInfo: &imageInfo, imageName: image }
 		svcs.Add(s)
@@ -98,6 +102,8 @@ func (client dockerClient) ListContainers(fn Filter) ([]Container, Services, err
 		if err != nil {
 			return nil, nil, err
 		}
+		
+		log.Infof("ContainerInspect Image: %s", runningContainer.)
 
 		imageInfo, _, err := client.api.ImageInspectWithRaw(bg, containerInfo.Image)
 		if err != nil {
@@ -284,7 +290,6 @@ func (client dockerClient) IsServiceStale(s Service) (bool, error) {
 	imageName := s.imageName
 
 	log.Infof("In IS SERVICE STALE CHECK - about to pull images")
-	log.Infof("ImageName: %s, ImageInfo.ID: %s", imageName, oldImageInfo.ID)
 
 	separatorIndex := strings.Index(imageName, "@")
 	if (separatorIndex > -1) {
@@ -328,6 +333,11 @@ func (client dockerClient) IsServiceStale(s Service) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+
+	// if we cannot find out the image id of the service might have to loop through the services containers and find out that way. This is not ideal.
+	//for i, c = range s.Containers() {
+	//	log.Infof("Checking service %s container %d", s.Name(), c.Name())
+	//}
 
 	log.Infof("About to compare images")
 	log.Infof("%s == %s", oldImageInfo.ID, newImageInfo.ID)
