@@ -13,7 +13,7 @@ func watchtowerContainersFilter(c container.Container) bool { return c.IsWatchto
 // detected, this function will stop and remove all but the most recently
 // started container.
 func CheckPrereqs(client container.Client, cleanup bool) error {
-	containers, err := client.ListContainers(watchtowerContainersFilter)
+	containers, _, err := client.ListContainers(watchtowerContainersFilter)
 	if err != nil {
 		return err
 	}

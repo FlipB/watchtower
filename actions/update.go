@@ -37,7 +37,7 @@ func containerFilter(names []string) container.Filter {
 func Update(client container.Client, names []string, cleanup bool, noRestart bool) error {
 	log.Debug("Checking containers for updated images")
 
-	containers, err := client.ListContainers(containerFilter(names))
+	containers, services, err := client.ListContainers(containerFilter(names))
 	if err != nil {
 		return err
 	}
@@ -45,11 +45,28 @@ func Update(client container.Client, names []string, cleanup bool, noRestart boo
 	for i, container := range containers {
 		stale, err := client.IsContainerStale(container)
 		if err != nil {
-			log.Infof("Unable to update container %s. Proceeding to next.", containers[i].Name())
+			log.Infof("Unable to update container %s. Proceeding to next.", container.Name())
 			log.Debug(err)
 			stale = false
 		}
 		containers[i].Stale = stale
+	}
+
+	for _, service := range services {
+		stale, err := client.IsServiceStale(service)
+		if err != nil {
+			log.Infof("Unable to update service %s. Proceeding to next.", service.Name())
+			log.Debug(err)
+			stale = false
+		}
+		service.Stale = stale
+
+		if (service.Stale) {
+			err := client.UpdateServiceImage(service)
+			if (err != nil) {
+				log.Infof("UpdateServiceImage got error %s", err)
+			}
+		}
 	}
 
 	containers, err = container.SortByDependencies(containers)

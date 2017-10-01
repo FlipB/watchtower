@@ -24,11 +24,13 @@ type Filter func(Container) bool
 // A Client is the interface through which watchtower interacts with the
 // Docker API.
 type Client interface {
-	ListContainers(Filter) ([]Container, error)
+	ListContainers(Filter) ([]Container, Services, error)
 	StopContainer(Container, time.Duration) error
 	StartContainer(Container) error
 	RenameContainer(Container, string) error
 	IsContainerStale(Container) (bool, error)
+	IsServiceStale(Service) (bool, error)
+	UpdateServiceImage(Service) error
 	RemoveImage(Container) error
 }
 
@@ -53,9 +55,34 @@ type dockerClient struct {
 	pullImages bool
 }
 
-func (client dockerClient) ListContainers(fn Filter) ([]Container, error) {
+func (client dockerClient) ListContainers(fn Filter) ([]Container, Services, error) {
 	cs := []Container{}
+	svcs := Services{}
 	bg := context.Background()
+
+	log.Debug("Retrieving services")
+
+	services, err := client.api.ServiceList(bg, types.ServiceListOptions{})
+	if (err != nil) {
+		return nil, nil, err
+	}
+
+	for _, service := range services {
+		name := service.Spec.Name
+		id := service.ID
+		image := service.Spec.TaskTemplate.ContainerSpec.Image
+
+		imageInfo, _, err := client.api.ImageInspectWithRaw(bg, image)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		s := Service{ name: name, id: id, imageInfo: &imageInfo, imageName: image }
+		svcs.Add(s)
+		log.Infof("Added service %s", name)
+	}
+
+	// service containers have label com.docker.swarm.service.id.
 
 	log.Debug("Retrieving running containers")
 
@@ -63,27 +90,41 @@ func (client dockerClient) ListContainers(fn Filter) ([]Container, error) {
 		bg,
 		types.ContainerListOptions{})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	for _, runningContainer := range runningContainers {
 		containerInfo, err := client.api.ContainerInspect(bg, runningContainer.ID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		imageInfo, _, err := client.api.ImageInspectWithRaw(bg, containerInfo.Image)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		c := Container{containerInfo: &containerInfo, imageInfo: &imageInfo}
-		if fn(c) {
-			cs = append(cs, c)
+		if !fn(c) {
+			log.Infof("Filtered out container id %s with image %s", runningContainer.ID, runningContainer.Image)
+			continue;
 		}
+
+		containerServiceID := runningContainer.Labels["com.docker.swarm.service.id"];
+		if (containerServiceID != "") {
+			s, err := svcs.Service(containerServiceID)
+			if (err != nil) {
+				return nil, nil, err
+			}
+			log.Infof("Adding service container id %s to service %s", runningContainer.ID, s.name)
+			s.AddContainer(c)
+			continue;
+		}
+
+		cs = append(cs, c)
 	}
 
-	return cs, nil
+	return cs, svcs, nil
 }
 
 func (client dockerClient) StopContainer(c Container, timeout time.Duration) error {
@@ -189,6 +230,7 @@ func (client dockerClient) IsContainerStale(c Container) (bool, error) {
 	if (separatorIndex > -1) {
 		// there's an @ in image name, this is probably a stack deployed container where image includes full tag and sha256 hash.
 		// let's strip it!
+		log.Infof("Container Stale check stripped image hash.")
 		imageName = imageName[:separatorIndex]
 	}
 
@@ -232,6 +274,98 @@ func (client dockerClient) IsContainerStale(c Container) (bool, error) {
 
 	return false, nil
 }
+
+
+
+
+func (client dockerClient) IsServiceStale(s Service) (bool, error) {
+	bg := context.Background()
+	oldImageInfo := s.imageInfo
+	imageName := s.imageName
+
+	separatorIndex := strings.Index(imageName, "@")
+	if (separatorIndex > -1) {
+		// there's an @ in image name, this is probably a stack deployed container where image includes full tag and sha256 hash.
+		// let's strip it!
+		log.Infof("Container Stale check stripped image hash.")
+		imageName = imageName[:separatorIndex]
+	}
+
+	if client.pullImages {
+		log.Debugf("Pulling %s for service %s", imageName, s.name)
+
+		var opts types.ImagePullOptions // ImagePullOptions can take a RegistryAuth arg to authenticate against a private registry
+		auth, err := EncodedAuth(imageName)
+		if err != nil {
+			log.Debugf("Error loading authentication credentials %s", err)
+			return false, err
+		} else if auth == "" {
+			log.Debugf("No authentication credentials found for %s", imageName)
+			opts = types.ImagePullOptions{} // empty/no auth credentials
+		} else {
+			opts = types.ImagePullOptions{RegistryAuth: auth, PrivilegeFunc: DefaultAuthHandler}
+		}
+
+		response, err := client.api.ImagePull(bg, imageName, opts)
+		if err != nil {
+			log.Infof("Error pulling image %s, %s", imageName, err)
+			return false, err
+		}
+		defer response.Close()
+
+		// the pull request will be aborted prematurely unless the response is read
+		_, err = ioutil.ReadAll(response)
+	}
+
+	newImageInfo, _, err := client.api.ImageInspectWithRaw(bg, imageName)
+	if err != nil {
+		return false, err
+	}
+
+	if newImageInfo.ID != oldImageInfo.ID {
+		log.Infof("Found new image %s (%s) for service %s", imageName, newImageInfo.ID, s.name)
+		s.newImageInfo = &newImageInfo
+		return true, nil
+	} else {
+		log.Debugf("No new images found for service %s", s.name)
+	}
+
+	return false, nil
+}
+
+
+
+func (client dockerClient) UpdateServiceImage(svc Service) error {
+	bg := context.Background()
+
+	service, _, err := client.api.ServiceInspectWithRaw(bg, svc.id)
+	if (err != nil) {
+		return err;
+	}
+
+	var updateOpts types.ServiceUpdateOptions
+	
+	var currentVersion = service.Version
+
+	var currentSpec = service.Spec
+	log.Infof("Service %s current image is %s", svc.name, currentSpec.TaskTemplate.ContainerSpec.Image)
+	var newSpec = currentSpec
+	newSpec.TaskTemplate.ContainerSpec.Image = svc.newImageInfo.ID;
+
+	log.Infof("Service %s new image is %s", svc.name, newSpec.TaskTemplate.ContainerSpec.Image)
+
+	response, err := client.api.ServiceUpdate(bg, svc.id, currentVersion, newSpec, updateOpts)
+	if (err != nil) {
+		return err
+	}
+	
+	for _, warn := range response.Warnings {
+		log.Infoln("UpdateServiceImage: " + warn)
+	}
+
+	return nil;
+}
+
 
 func (client dockerClient) RemoveImage(c Container) error {
 	imageID := c.ImageID()
