@@ -283,6 +283,9 @@ func (client dockerClient) IsServiceStale(s Service) (bool, error) {
 	oldImageInfo := s.imageInfo
 	imageName := s.imageName
 
+	log.Infof("In IS SERVICE STALE CHECK - about to pull images")
+	log.Infof("ImageName: %s, ImageInfo.ID: %s", imageName, oldImageInfo.ID)
+
 	separatorIndex := strings.Index(imageName, "@")
 	if (separatorIndex > -1) {
 		// there's an @ in image name, this is probably a stack deployed container where image includes full tag and sha256 hash.
@@ -303,6 +306,7 @@ func (client dockerClient) IsServiceStale(s Service) (bool, error) {
 			log.Debugf("No authentication credentials found for %s", imageName)
 			opts = types.ImagePullOptions{} // empty/no auth credentials
 		} else {
+			log.Debugf("Using authentication credentials for %s", imageName)
 			opts = types.ImagePullOptions{RegistryAuth: auth, PrivilegeFunc: DefaultAuthHandler}
 		}
 
@@ -315,12 +319,18 @@ func (client dockerClient) IsServiceStale(s Service) (bool, error) {
 
 		// the pull request will be aborted prematurely unless the response is read
 		_, err = ioutil.ReadAll(response)
+		if (err != nil) {
+			log.Infof("Error reading repsonse: %s", err.Error())
+		}
 	}
 
 	newImageInfo, _, err := client.api.ImageInspectWithRaw(bg, imageName)
 	if err != nil {
 		return false, err
 	}
+
+	log.Infof("About to compare images")
+	log.Infof("%s == %s", oldImageInfo.ID, newImageInfo.ID)
 
 	if newImageInfo.ID != oldImageInfo.ID {
 		log.Infof("Found new image %s (%s) for service %s", imageName, newImageInfo.ID, s.name)
